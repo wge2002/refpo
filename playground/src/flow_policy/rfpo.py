@@ -57,7 +57,8 @@ class FpoConfig:
     gae_lambda: float = 0.95
     normalize_advantage: jdc.Static[bool] = True
     value_loss_coeff: float = 0.25
-
+    
+    reflow_loss_coeff: float = 1.0
 
     def __post_init__(self) -> None:
         assert self.timestep_embed_dim % 2 == 0
@@ -102,7 +103,7 @@ FpoTransition = rollouts.TransitionStruct[FpoActionInfo | DenoisingMdpActionInfo
 
 
 @jdc.pytree_dataclass
-class FpoState:
+class RfpoState:
     """PPO agent state."""
 
     env: jdc.Static[mjp.MjxEnv]
@@ -580,7 +581,10 @@ class FpoState:
                 eps=transitions.action_info.loss_eps,
                 t=transitions.action_info.loss_t,
             )
+            
             assert cfm_loss.shape == transitions.action_info.initial_cfm_loss.shape
+
+            reflow_loss_val = jnp.mean(cfm_loss)
 
             if self.config.average_losses_before_exp:
                 rho_s = jnp.exp(
@@ -697,6 +701,9 @@ class FpoState:
         metrics["v_loss"] = v_loss
 
         # Compute the total loss that will be used for optimization
-        total_loss = policy_loss + v_loss
+        total_loss = policy_loss + v_loss + self.config.reflow_loss_coeff * reflow_loss_val
+
+        metrics["reflow_loss"] = reflow_loss_val
+        metrics["total_loss"] = total_loss # Optional: log total loss
 
         return total_loss, metrics

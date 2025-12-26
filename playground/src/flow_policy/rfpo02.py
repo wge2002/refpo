@@ -57,7 +57,8 @@ class FpoConfig:
     gae_lambda: float = 0.95
     normalize_advantage: jdc.Static[bool] = True
     value_loss_coeff: float = 0.25
-
+    
+    reflow_loss_coeff: float = 1.0
 
     def __post_init__(self) -> None:
         assert self.timestep_embed_dim % 2 == 0
@@ -102,7 +103,7 @@ FpoTransition = rollouts.TransitionStruct[FpoActionInfo | DenoisingMdpActionInfo
 
 
 @jdc.pytree_dataclass
-class FpoState:
+class Rfpo02State:
     """PPO agent state."""
 
     env: jdc.Static[mjp.MjxEnv]
@@ -344,7 +345,8 @@ class FpoState:
             return x_t_next, x_t
 
         prng_sample, prng_loss, prng_feather, prng_noise = jax.random.split(prng, num=4)
-
+        
+        initial_noise = jax.random.normal(prng_sample, (*batch_dims, self.env.action_size))
         # Generate full timestep path and slice it for current/next pairs
         noise_path = jax.random.normal(
             prng_noise,
@@ -352,7 +354,8 @@ class FpoState:
         )
         x0, x_t_path = jax.lax.scan(
             euler_step,
-            init=jax.random.normal(prng_sample, (*batch_dims, self.env.action_size)),
+            # init=jax.random.normal(prng_sample, (*batch_dims, self.env.action_size)),
+            init=initial_noise,
             xs=(self.get_schedule(), noise_path),
         )
 
@@ -368,8 +371,13 @@ class FpoState:
         if self.config.loss_mode == "fpo":
             # Sample eps and t for FPO loss.
             sample_shape = (*batch_dims, self.config.n_samples_per_action)
-            prng_eps, prng_t = jax.random.split(prng_loss)
-            eps = jax.random.normal(prng_eps, (*sample_shape, self.env.action_size))
+            # prng_eps, prng_t = jax.random.split(prng_loss)
+            prng_t = prng_loss
+            eps = jnp.broadcast_to(
+                initial_noise[..., None, :], 
+                (*sample_shape, self.env.action_size)
+            )
+            # eps = jax.random.normal(prng_eps, (*sample_shape, self.env.action_size))
             if self.config.discretize_t_for_training:
                 t = self.get_schedule().t_current[
                     jax.random.randint(
@@ -580,7 +588,10 @@ class FpoState:
                 eps=transitions.action_info.loss_eps,
                 t=transitions.action_info.loss_t,
             )
+            
             assert cfm_loss.shape == transitions.action_info.initial_cfm_loss.shape
+
+            reflow_loss_val = jnp.mean(cfm_loss)
 
             if self.config.average_losses_before_exp:
                 rho_s = jnp.exp(
@@ -697,6 +708,9 @@ class FpoState:
         metrics["v_loss"] = v_loss
 
         # Compute the total loss that will be used for optimization
-        total_loss = policy_loss + v_loss
+        total_loss = policy_loss + v_loss + self.config.reflow_loss_coeff * reflow_loss_val
+
+        metrics["reflow_loss"] = reflow_loss_val
+        metrics["total_loss"] = total_loss # Optional: log total loss
 
         return total_loss, metrics

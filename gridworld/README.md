@@ -28,7 +28,7 @@ pip install -r requirements.txt
 #python main.py --method rfpo
 CUDA_VISIBLE_DEVICES=1 python main.py --method rfpo
 CUDA_VISIBLE_DEVICES=2 python main.py --method rfpo02
-
+CUDA_VISIBLE_DEVICES=3 python main.py --method fpo
 # Train PPO policy
 python main.py --method ppo
 
