@@ -415,6 +415,10 @@ if __name__ == "__main__":
             args.model_path = "ppo_actor.pth"
         elif args.method == "fpo":
             args.model_path = "fpo_actor.pth"
+        elif args.method == "rfpo":
+            args.model_path = "rfpo_actor.pth"
+        elif args.method == "rfpo02":
+            args.model_path = "rfpo02_actor.pth"
         else:
             raise ValueError(f"Unknown method: {args.method}")
 
